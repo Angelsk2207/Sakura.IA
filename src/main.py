@@ -1,9 +1,10 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from providers import ProviderError, ask_nvidia
 from router import ModelRouter, TaskType
 
-app = FastAPI(title="Sakura.IA Cloud", version="0.1.0")
+app = FastAPI(title="Sakura.IA Cloud", version="0.2.0")
 router = ModelRouter()
 
 
@@ -32,15 +33,20 @@ def plan(request: ChatRequest):
 
 
 @app.post("/chat")
-def chat(request: ChatRequest):
-    """V1 intentionally returns a transparent execution plan.
-
-    Provider adapters are the next layer. No prompt is sent anywhere until an
-    adapter is explicitly configured, keeping this first version safe.
-    """
-    result = router.plan(request.task, request.private_only)
-    return {
-        "message": request.message,
-        "router": result,
-        "next_step": "provider_adapter_not_configured",
-    }
+async def chat(request: ChatRequest):
+    """Send a chat request through the first configured real provider."""
+    if request.private_only:
+        return {
+            "status": "local_provider_pending",
+            "message": "O modo privado exige um modelo local configurado.",
+        }
+    try:
+        result = await ask_nvidia([{"role": "user", "content": request.message}])
+        return {"status": "ok", "router": router.plan(request.task), **result}
+    except ProviderError as exc:
+        return {
+            "status": "provider_unavailable",
+            "router": router.plan(request.task),
+            "error": str(exc),
+            "next_step": "fallback_provider",
+        }
