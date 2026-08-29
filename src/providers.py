@@ -38,3 +38,28 @@ async def ask_nvidia(messages: list[dict[str, str]]) -> dict[str, Any]:
     except (KeyError, IndexError, TypeError) as exc:
         raise ProviderError("NVIDIA returned an unexpected response") from exc
     return {"provider": "nvidia_nim", "model": model, "text": text}
+
+
+async def ask_cloudflare(messages: list[dict[str, str]]) -> dict[str, Any]:
+    api_token = os.getenv("CLOUDFLARE_API_TOKEN", "")
+    account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID", "")
+    if not api_token or not account_id:
+        raise ProviderError("Cloudflare credentials are not configured")
+
+    model = os.getenv("CLOUDFLARE_MODEL", "@cf/meta/llama-3.1-8b-instruct")
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}"
+    headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post(url, headers=headers, json={"messages": messages})
+    except httpx.HTTPError as exc:
+        raise ProviderError(f"Cloudflare connection failed: {exc}") from exc
+
+    if response.status_code >= 400:
+        raise ProviderError(f"Cloudflare returned HTTP {response.status_code}")
+    data = response.json()
+    result = data.get("result", data)
+    text = result.get("response") if isinstance(result, dict) else None
+    if not text:
+        raise ProviderError("Cloudflare returned an unexpected response")
+    return {"provider": "cloudflare", "model": model, "text": text}
