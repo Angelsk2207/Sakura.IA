@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from providers import ProviderError, ask_nvidia
+from providers import ProviderError, ask_cloudflare, ask_nvidia
 from router import ModelRouter, TaskType
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -48,8 +48,17 @@ def plan(request: ChatRequest):
 async def chat(request: ChatRequest):
     if request.private_only:
         return {"status": "local_provider_pending", "message": "O modo privado exige um modelo local configurado."}
-    try:
-        result = await ask_nvidia([{"role": "user", "content": request.message}])
-        return {"status": "ok", "router": router.plan(request.task), **result}
-    except ProviderError as exc:
-        return {"status": "provider_unavailable", "router": router.plan(request.task), "error": str(exc), "next_step": "fallback_provider"}
+    messages = [{"role": "user", "content": request.message}]
+    errors = []
+    for provider_name, adapter in (("nvidia_nim", ask_nvidia), ("cloudflare", ask_cloudflare)):
+        try:
+            result = await adapter(messages)
+            return {"status": "ok", "router": router.plan(request.task), "attempted": provider_name, **result}
+        except ProviderError as exc:
+            errors.append({"provider": provider_name, "error": str(exc)})
+    return {
+        "status": "provider_unavailable",
+        "router": router.plan(request.task),
+        "errors": errors,
+        "next_step": "configure_or_add_provider",
+    }
