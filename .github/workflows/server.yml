@@ -1,0 +1,31 @@
+name: Build and test Sakura NANO server
+
+on:
+  push:
+    branches: [feature/router-v1]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build -t sakura-nano .
+      - name: Start server
+        run: docker run -d --name sakura-nano -p 8000:8000 sakura-nano
+      - name: Check health endpoint
+        run: |
+          for i in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:8000/health; then exit 0; fi
+            sleep 2
+          done
+          docker logs sakura-nano
+          exit 1
+      - name: Show available routes
+        run: curl --fail --silent http://127.0.0.1:8000/models
