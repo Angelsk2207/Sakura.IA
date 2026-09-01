@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from providers import ProviderError, ask_cloudflare, ask_nvidia
+from db import recent_messages, save_message
 from router import ModelRouter, TaskType
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -44,6 +45,11 @@ def plan(request: ChatRequest):
     return result
 
 
+@app.get("/history")
+async def history():
+    return {"status": "ok", "messages": await recent_messages()}
+
+
 @app.post("/chat")
 async def chat(request: ChatRequest):
     if request.private_only:
@@ -53,6 +59,7 @@ async def chat(request: ChatRequest):
     for provider_name, adapter in (("nvidia_nim", ask_nvidia), ("cloudflare", ask_cloudflare)):
         try:
             result = await adapter(messages)
+            await save_message(request.message, result.get("text", ""), result.get("provider", provider_name))
             return {"status": "ok", "router": router.plan(request.task), "attempted": provider_name, **result}
         except ProviderError as exc:
             errors.append({"provider": provider_name, "error": str(exc)})
@@ -62,3 +69,4 @@ async def chat(request: ChatRequest):
         "errors": errors,
         "next_step": "configure_or_add_provider",
     }
+
